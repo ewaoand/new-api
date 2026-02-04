@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -644,7 +645,7 @@ func FormatClaudeResponseInfo(requestMode int, claudeResponse *dto.ClaudeRespons
 	if oaiResponse != nil {
 		oaiResponse.Id = claudeInfo.ResponseId
 		oaiResponse.Created = claudeInfo.Created
-		oaiResponse.Model = claudeInfo.Model
+		// Model 已经在 StreamResponseClaude2OpenAI 中根据 IsModelMapped 正确设置了，这里不再覆盖
 	}
 	return true
 }
@@ -667,6 +668,10 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			if claudeResponse.Type == "message_start" {
 				// message_start, 获取usage
 				info.UpstreamModelName = claudeResponse.Message.Model
+				// 如果模型被映射过，替换响应中的模型名为原始模型名
+				if info.IsModelMapped {
+					data, _ = sjson.Set(data, "message.model", info.OriginModelName)
+				}
 			} else if claudeResponse.Type == "content_block_delta" {
 			} else if claudeResponse.Type == "message_delta" {
 			}
@@ -707,7 +712,12 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 		//
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
 		if info.ShouldIncludeUsage {
-			response := helper.GenerateFinalUsageResponse(claudeInfo.ResponseId, claudeInfo.Created, info.UpstreamModelName, *claudeInfo.Usage)
+			// 如果模型被映射过，使用原始模型名返回给用户
+			modelName := info.UpstreamModelName
+			if info.IsModelMapped {
+				modelName = info.OriginModelName
+			}
+			response := helper.GenerateFinalUsageResponse(claudeInfo.ResponseId, claudeInfo.Created, modelName, *claudeInfo.Usage)
 			err := helper.ObjectData(c, response)
 			if err != nil {
 				common.SysLog("send final response failed: " + err.Error())
@@ -771,7 +781,17 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
 	case types.RelayFormatClaude:
-		responseData = data
+		// 如果模型被映射过，替换响应中的模型名为原始模型名
+		if info.IsModelMapped {
+			modifiedData, err := sjson.Set(string(data), "model", info.OriginModelName)
+			if err == nil {
+				responseData = []byte(modifiedData)
+			} else {
+				responseData = data
+			}
+		} else {
+			responseData = data
+		}
 	}
 
 	if claudeResponse.Usage.ServerToolUse != nil && claudeResponse.Usage.ServerToolUse.WebSearchRequests > 0 {
