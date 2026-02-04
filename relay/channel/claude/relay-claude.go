@@ -415,10 +415,15 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 	return &claudeRequest, nil
 }
 
-func StreamResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse) *dto.ChatCompletionsStreamResponse {
+func StreamResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse, info *relaycommon.RelayInfo) *dto.ChatCompletionsStreamResponse {
 	var response dto.ChatCompletionsStreamResponse
 	response.Object = "chat.completion.chunk"
-	response.Model = claudeResponse.Model
+	// 如果模型被映射过，使用原始模型名返回给用户
+	if info != nil && info.IsModelMapped {
+		response.Model = info.OriginModelName
+	} else {
+		response.Model = claudeResponse.Model
+	}
 	response.Choices = make([]dto.ChatCompletionsStreamResponseChoice, 0)
 	tools := make([]dto.ToolCallResponse, 0)
 	fcIdx := 0
@@ -438,7 +443,12 @@ func StreamResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse
 	} else {
 		if claudeResponse.Type == "message_start" {
 			response.Id = claudeResponse.Message.Id
-			response.Model = claudeResponse.Message.Model
+			// 如果模型被映射过，使用原始模型名返回给用户
+			if info != nil && info.IsModelMapped {
+				response.Model = info.OriginModelName
+			} else {
+				response.Model = claudeResponse.Message.Model
+			}
 			//claudeUsage = &claudeResponse.Message.Usage
 			choice.Delta.SetContentString("")
 			choice.Delta.Role = "assistant"
@@ -505,7 +515,7 @@ func StreamResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse
 	return &response
 }
 
-func ResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse) *dto.OpenAITextResponse {
+func ResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse, info *relaycommon.RelayInfo) *dto.OpenAITextResponse {
 	choices := make([]dto.OpenAITextResponseChoice, 0)
 	fullTextResponse := dto.OpenAITextResponse{
 		Id:      fmt.Sprintf("chatcmpl-%s", common.GetUUID()),
@@ -573,7 +583,12 @@ func ResponseClaude2OpenAI(reqMode int, claudeResponse *dto.ClaudeResponse) *dto
 		choice.Message.SetToolCalls(tools)
 	}
 	choice.Message.ReasoningContent = thinkingContent
-	fullTextResponse.Model = claudeResponse.Model
+	// 如果模型被映射过，使用原始模型名返回给用户
+	if info != nil && info.IsModelMapped {
+		fullTextResponse.Model = info.OriginModelName
+	} else {
+		fullTextResponse.Model = claudeResponse.Model
+	}
 	choices = append(choices, choice)
 	fullTextResponse.Choices = choices
 	return &fullTextResponse
@@ -658,7 +673,7 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 		helper.ClaudeChunkData(c, claudeResponse, data)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
-		response := StreamResponseClaude2OpenAI(requestMode, &claudeResponse)
+		response := StreamResponseClaude2OpenAI(requestMode, &claudeResponse, info)
 
 		if !FormatClaudeResponseInfo(requestMode, &claudeResponse, response, claudeInfo) {
 			return nil
@@ -749,7 +764,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	var responseData []byte
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
-		openaiResponse := ResponseClaude2OpenAI(requestMode, &claudeResponse)
+		openaiResponse := ResponseClaude2OpenAI(requestMode, &claudeResponse, info)
 		openaiResponse.Usage = *claudeInfo.Usage
 		responseData, err = json.Marshal(openaiResponse)
 		if err != nil {
