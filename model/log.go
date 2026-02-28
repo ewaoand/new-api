@@ -53,13 +53,7 @@ const (
 func formatUserLogs(logs []*Log) {
 	for i := range logs {
 		logs[i].ChannelName = ""
-		var otherMap map[string]interface{}
-		otherMap, _ = common.StrToMap(logs[i].Other)
-		if otherMap != nil {
-			// delete admin
-			delete(otherMap, "admin_info")
-		}
-		logs[i].Other = common.MapToJsonStr(otherMap)
+		logs[i].Other = ""
 		logs[i].Id = logs[i].Id % 1024
 	}
 }
